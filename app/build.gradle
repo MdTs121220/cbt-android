@@ -3,6 +3,7 @@ plugins {
 }
 
 android {
+    namespace "com.edutimurkasuari.cbt"
     compileSdk 34
 
     defaultConfig {
