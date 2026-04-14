@@ -1,0 +1,3 @@
+-keep class com.edutimurkasuari.cbt.** { *; }
+-keepattributes *Annotation*
+-dontwarn android.webkit.**
