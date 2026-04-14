@@ -44,5 +44,5 @@ android {
 }
 
 dependencies {
-    // Tidak ada dependency eksternal — pure Android WebView
+    implementation 'androidx.core:core:1.12.0'
 }
