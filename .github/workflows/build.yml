@@ -3,7 +3,7 @@ name: Build CBT Android APK
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:  # bisa trigger manual dari GitHub
+  workflow_dispatch:
 
 jobs:
   build:
@@ -33,34 +33,12 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      # ── Build DEBUG APK (tidak perlu keystore) ─────────────────────────
       - name: Build Debug APK
         run: ./gradlew assembleDebug
 
-      - name: Upload Debug APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: CBT-Debug-APK
+          name: CBT-EDU-TimurKasuari-APK
           path: app/build/outputs/apk/debug/*.apk
-          retention-days: 30
-
-      # ── Build RELEASE APK (perlu keystore di GitHub Secrets) ──────────
-      - name: Build Release APK
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > app/keystore.jks
-          export KEYSTORE_PATH=keystore.jks
-          ./gradlew assembleRelease
-
-      - name: Upload Release APK
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: CBT-Release-APK
-          path: app/build/outputs/apk/release/*.apk
           retention-days: 30
