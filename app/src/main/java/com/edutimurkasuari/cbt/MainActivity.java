@@ -2,10 +2,8 @@ package com.edutimurkasuari.cbt;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
-import android.app.PendingIntent;
-import android.content.Intent;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -19,9 +17,14 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.ProgressBar;
-import androidx.core.app.NotificationCompat;
-import androidx.core.app.NotificationManagerCompat;
+import android.widget.TextView;
+import android.widget.Toast;
+import org.json.JSONObject;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -30,16 +33,17 @@ public class MainActivity extends Activity {
     private WebView webView;
     private ProgressBar progressBar;
     private Handler handler = new Handler();
-    private Runnable autoSubmitRunnable;
     private static final String ALLOWED_DOMAIN  = "edu.timurkasuari.com";
     private static final String START_URL       = "https://edu.timurkasuari.com/cbt/";
+    private static final String PIN_API_URL     = "https://edu.timurkasuari.com/cbt/siswa/get_kiosk_pin.php";
     private static final String AUTO_SUBMIT_URL = "https://edu.timurkasuari.com/cbt/siswa/exit_submit.php";
+    private String  kioskPin         = "1234";
     private String  currentExamId    = "";
     private String  currentCsrfToken = "";
     private boolean examActive        = false;
+    private boolean pinDialogShowing  = false;
+    private Runnable autoSubmitRunnable;
     private static final int EXIT_GRACE_SECONDS = 15;
-    private static final String NOTIF_CHANNEL   = "cbt_exit";
-    private static final int    NOTIF_ID        = 1001;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -49,7 +53,7 @@ public class MainActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setContentView(R.layout.activity_main);
         hideSystemUI();
-        webView     = findViewById(R.id.webview);
+        webView = findViewById(R.id.webview);
         progressBar = findViewById(R.id.progressBar);
         WebSettings s = webView.getSettings();
         s.setJavaScriptEnabled(true);
@@ -68,9 +72,10 @@ public class MainActivity extends Activity {
         webView.addJavascriptInterface(new Object() {
             @JavascriptInterface
             public void setExamState(String examId, String csrf, boolean active) {
-                currentExamId    = examId;
+                currentExamId = examId;
                 currentCsrfToken = csrf;
-                examActive       = active;
+                examActive = active;
+                if (active && !examId.isEmpty()) fetchKioskPin();
             }
         }, "CBTKiosk");
         webView.setWebViewClient(new WebViewClient() {
@@ -84,13 +89,7 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 if (progressBar != null) progressBar.setVisibility(View.GONE);
-                view.evaluateJavascript(
-                    "(function(){" +
-                    "var ei=document.querySelector('[name=exam_id]');" +
-                    "var csrf=document.querySelector('[name=_csrf]');" +
-                    "var isExam=window.location.href.indexOf('/siswa/ujian.php')>-1;" +
-                    "if(window.CBTKiosk){window.CBTKiosk.setExamState(ei?ei.value:'',csrf?csrf.value:'',isExam);}" +
-                    "})();", null);
+                view.evaluateJavascript("(function(){var ei=document.querySelector('[name=exam_id]');var csrf=document.querySelector('[name=_csrf]');var isExam=window.location.href.indexOf('/siswa/ujian.php')>-1;if(window.CBTKiosk){window.CBTKiosk.setExamState(ei?ei.value:'',csrf?csrf.value:'',isExam);}})();", null);
             }
         });
         webView.setWebChromeClient(new WebChromeClient() {
@@ -98,23 +97,37 @@ public class MainActivity extends Activity {
             public void onProgressChanged(WebView view, int progress) {
                 if (progressBar == null) return;
                 if (progress < 100) { progressBar.setVisibility(View.VISIBLE); progressBar.setProgress(progress); }
-                else { progressBar.setVisibility(View.GONE); }
+                else progressBar.setVisibility(View.GONE);
             }
         });
         webView.loadUrl(START_URL);
-        setupNotificationChannel();
+        startKioskMode();
+    }
+
+    private void startKioskMode() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            try { startLockTask(); } catch (Exception e) {}
+        }
+    }
+
+    private void stopKioskMode() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            try { stopLockTask(); } catch (Exception e) {}
+        }
     }
 
     @Override
     public void onBackPressed() {
-        if (webView != null && webView.canGoBack()) webView.goBack();
+        if (webView != null && webView.canGoBack()) { webView.goBack(); return; }
+        showPinDialog();
     }
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         switch (keyCode) {
             case KeyEvent.KEYCODE_HOME: case KeyEvent.KEYCODE_APP_SWITCH:
-            case KeyEvent.KEYCODE_MENU: case KeyEvent.KEYCODE_SEARCH: return true;
+            case KeyEvent.KEYCODE_MENU: case KeyEvent.KEYCODE_SEARCH:
+                showPinDialog(); return true;
         }
         return super.onKeyDown(keyCode, event);
     }
@@ -126,6 +139,84 @@ public class MainActivity extends Activity {
             case KeyEvent.KEYCODE_MENU: case KeyEvent.KEYCODE_SEARCH: return true;
         }
         return super.onKeyUp(keyCode, event);
+    }
+
+    private void showPinDialog() {
+        if (pinDialogShowing) return;
+        pinDialogShowing = true;
+        runOnUiThread(new Runnable() {
+            @Override public void run() {
+                LinearLayout layout = new LinearLayout(MainActivity.this);
+                layout.setOrientation(LinearLayout.VERTICAL);
+                int pad = (int)(20 * getResources().getDisplayMetrics().density);
+                layout.setPadding(pad, pad, pad, 0);
+                TextView msg = new TextView(MainActivity.this);
+                msg.setText("Masukkan PIN dari Proktor untuk keluar dari ujian");
+                msg.setTextSize(14);
+                msg.setPadding(0, 0, 0, pad/2);
+                layout.addView(msg);
+                final EditText pinInput = new EditText(MainActivity.this);
+                pinInput.setHint("PIN Proktor");
+                pinInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+                pinInput.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+                pinInput.setTextSize(24);
+                layout.addView(pinInput);
+                AlertDialog dialog = new AlertDialog.Builder(MainActivity.this)
+                    .setTitle("Keluar dari Ujian")
+                    .setView(layout)
+                    .setCancelable(false)
+                    .setPositiveButton("Keluar", null)
+                    .setNegativeButton("Kembali ke Soal", new DialogInterface.OnClickListener() {
+                        @Override public void onClick(DialogInterface d, int w) { pinDialogShowing = false; d.dismiss(); }
+                    }).create();
+                dialog.setOnShowListener(new DialogInterface.OnShowListener() {
+                    @Override public void onShow(final DialogInterface d) {
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
+                            @Override public void onClick(View v) {
+                                String entered = pinInput.getText().toString().trim();
+                                if (entered.equals(kioskPin)) {
+                                    pinDialogShowing = false;
+                                    d.dismiss();
+                                    stopKioskMode();
+                                    finish();
+                                } else {
+                                    pinInput.setText("");
+                                    pinInput.setError("PIN salah!");
+                                    Toast.makeText(MainActivity.this, "PIN salah!", Toast.LENGTH_SHORT).show();
+                                }
+                            }
+                        });
+                    }
+                });
+                dialog.show();
+            }
+        });
+    }
+
+    private void fetchKioskPin() {
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    URL url = new URL(PIN_API_URL);
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("GET");
+                    conn.setConnectTimeout(5000);
+                    conn.setReadTimeout(5000);
+                    String cookies = CookieManager.getInstance().getCookie(PIN_API_URL);
+                    if (cookies != null) conn.setRequestProperty("Cookie", cookies);
+                    if (conn.getResponseCode() == 200) {
+                        BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                        StringBuilder sb = new StringBuilder();
+                        String line;
+                        while ((line = br.readLine()) != null) sb.append(line);
+                        br.close();
+                        JSONObject json = new JSONObject(sb.toString());
+                        if ("ok".equals(json.optString("status"))) kioskPin = json.optString("pin", "1234");
+                    }
+                    conn.disconnect();
+                } catch (Exception e) {}
+            }
+        }).start();
     }
 
     @Override
@@ -150,34 +241,24 @@ public class MainActivity extends Activity {
 
     private void startExitCountdown() {
         cancelExitCountdown();
-        showExitNotification(EXIT_GRACE_SECONDS);
         autoSubmitRunnable = new Runnable() {
             int remaining = EXIT_GRACE_SECONDS;
             @Override public void run() {
                 remaining--;
-                if (remaining <= 0) {
-                    cancelNotification();
-                    submitExamFromBackground();
-                } else {
-                    showExitNotification(remaining);
-                    handler.postDelayed(this, 1000);
-                }
+                if (remaining <= 0) { submitExamFromBackground(); }
+                else handler.postDelayed(this, 1000);
             }
         };
         handler.postDelayed(autoSubmitRunnable, 1000);
     }
 
     private void cancelExitCountdown() {
-        if (autoSubmitRunnable != null) {
-            handler.removeCallbacks(autoSubmitRunnable);
-            autoSubmitRunnable = null;
-        }
-        cancelNotification();
+        if (autoSubmitRunnable != null) { handler.removeCallbacks(autoSubmitRunnable); autoSubmitRunnable = null; }
     }
 
     private void submitExamFromBackground() {
         final String examId = currentExamId;
-        final String csrf   = currentCsrfToken;
+        final String csrf = currentCsrfToken;
         new Thread(new Runnable() {
             @Override public void run() {
                 try {
@@ -187,50 +268,25 @@ public class MainActivity extends Activity {
                     conn.setDoOutput(true);
                     conn.setConnectTimeout(10000);
                     conn.setReadTimeout(10000);
-                    conn.setRequestProperty("Content-Type","application/x-www-form-urlencoded");
-                    String body = "exam_id="+examId+"&_csrf="+csrf+"&source=apk_exit";
+                    conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                    String cookies = CookieManager.getInstance().getCookie(AUTO_SUBMIT_URL);
+                    if (cookies != null) conn.setRequestProperty("Cookie", cookies);
+                    String body = "exam_id=" + examId + "&_csrf=" + csrf + "&source=apk_exit";
                     OutputStream os = conn.getOutputStream();
                     os.write(body.getBytes("UTF-8"));
                     os.flush(); os.close();
                     conn.getResponseCode();
                     conn.disconnect();
-                } catch (Exception e) { /* server handle via end_datetime */ }
+                } catch (Exception e) {}
             }
         }).start();
     }
 
-    private void setupNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel ch = new NotificationChannel(NOTIF_CHANNEL,"CBT Peringatan Ujian",NotificationManager.IMPORTANCE_HIGH);
-            NotificationManager nm = getSystemService(NotificationManager.class);
-            if (nm != null) nm.createNotificationChannel(ch);
-        }
-    }
-
-    private void showExitNotification(int sec) {
-        Intent intent = new Intent(this, MainActivity.class);
-        intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT|Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        PendingIntent pi = PendingIntent.getActivity(this,0,intent,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
-        NotificationCompat.Builder b = new NotificationCompat.Builder(this,NOTIF_CHANNEL)
-            .setSmallIcon(android.R.drawable.ic_dialog_alert)
-            .setContentTitle("PERINGATAN UJIAN!")
-            .setContentText("Kembali dalam "+sec+" detik atau ujian dikumpulkan otomatis!")
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setAutoCancel(false).setOngoing(true).setContentIntent(pi);
-        try { NotificationManagerCompat.from(this).notify(NOTIF_ID,b.build()); }
-        catch (SecurityException e) { /* no permission */ }
-    }
-
-    private void cancelNotification() {
-        NotificationManagerCompat.from(this).cancel(NOTIF_ID);
-    }
-
     private void hideSystemUI() {
         getWindow().getDecorView().setSystemUiVisibility(
-            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY|View.SYSTEM_UI_FLAG_FULLSCREEN
-            |View.SYSTEM_UI_FLAG_HIDE_NAVIGATION|View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-            |View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN|View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_FULLSCREEN
+            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
     }
 
     @Override
