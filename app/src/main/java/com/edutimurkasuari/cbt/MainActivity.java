@@ -33,8 +33,7 @@ public class MainActivity extends Activity {
 
     private WebView     webView;
     private ProgressBar progressBar;
-    private Handler     handler       = new Handler();
-    private Runnable    autoSubmitRunnable;
+    private Handler     handler = new Handler();
 
     private static final String ALLOWED_DOMAIN  = "edu.timurkasuari.com";
     private static final String START_URL       = "https://edu.timurkasuari.com/cbt/";
@@ -42,25 +41,22 @@ public class MainActivity extends Activity {
     private static final String AUTO_SUBMIT_URL = "https://edu.timurkasuari.com/cbt/siswa/exit_submit.php";
     private static final String APK_PING_URL    = "https://edu.timurkasuari.com/cbt/siswa/apk_ping.php";
 
-    private String  kioskPin         = "1234";
-    private String  currentExamId    = "";
-    private String  currentCsrfToken = "";
-    private boolean examActive        = false;
-    private boolean pinDialogShowing  = false;
+    private String  kioskPin        = "1234";
+    private String  currentExamId   = "";
+    private String  currentCsrfToken= "";
+    private boolean examActive       = false;
+    private boolean pinDialogShowing = false;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,
-                WindowManager.LayoutParams.FLAG_SECURE);
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setContentView(R.layout.activity_main);
         hideSystemUI();
-
         webView     = findViewById(R.id.webview);
         progressBar = findViewById(R.id.progressBar);
-
         WebSettings s = webView.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
@@ -73,10 +69,8 @@ public class MainActivity extends Activity {
         s.setDisplayZoomControls(false);
         s.setLoadWithOverviewMode(true);
         s.setUseWideViewPort(true);
-
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
-
         webView.addJavascriptInterface(new Object() {
             @JavascriptInterface
             public void setExamState(String examId, String csrf, boolean active) {
@@ -86,7 +80,6 @@ public class MainActivity extends Activity {
                 if (active && !examId.isEmpty()) fetchKioskPin();
             }
         }, "CBTKiosk");
-
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
@@ -98,57 +91,57 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 if (progressBar != null) progressBar.setVisibility(View.GONE);
-                view.evaluateJavascript(
-                    "(function(){" +
-                    "var ei=document.querySelector('[name=exam_id]');" +
-                    "var csrf=document.querySelector('[name=_csrf]');" +
-                    "var isExam=window.location.href.indexOf('/siswa/ujian.php')>-1;" +
-                    "if(window.CBTKiosk){" +
-                    "window.CBTKiosk.setExamState(" +
-                    "ei?ei.value:''," +
-                    "csrf?csrf.value:''," +
-                    "isExam);" +
-                    "}" +
-                    "})();", null);
+                view.evaluateJavascript("(function(){var ei=document.querySelector('[name=exam_id]');var csrf=document.querySelector('[name=_csrf]');var isExam=window.location.href.indexOf('/siswa/ujian.php')>-1;if(window.CBTKiosk){window.CBTKiosk.setExamState(ei?ei.value:'',csrf?csrf.value:'',isExam);}})();", null);
             }
         });
-
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public void onProgressChanged(WebView view, int progress) {
                 if (progressBar == null) return;
-                if (progress < 100) {
-                    progressBar.setVisibility(View.VISIBLE);
-                    progressBar.setProgress(progress);
-                } else {
-                    progressBar.setVisibility(View.GONE);
-                }
+                if (progress < 100) { progressBar.setVisibility(View.VISIBLE); progressBar.setProgress(progress); }
+                else progressBar.setVisibility(View.GONE);
             }
         });
-
         webView.loadUrl(START_URL);
-        startKioskMode();
+        // TIDAK pakai startLockTask() — agar PIN dialog tetap bisa muncul
     }
 
-    private void startKioskMode() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            try { startLockTask(); } catch (Exception e) {}
-        }
+    @Override
+    public void onBackPressed() {
+        if (webView != null && webView.canGoBack()) { webView.goBack(); return; }
+        if (examActive) showPinDialog();
     }
 
-    private void stopKioskMode() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            try { stopLockTask(); } catch (Exception e) {}
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_HOME:
+            case KeyEvent.KEYCODE_APP_SWITCH:
+            case KeyEvent.KEYCODE_MENU:
+            case KeyEvent.KEYCODE_SEARCH:
+                if (examActive) showPinDialog();
+                return true;
         }
+        return super.onKeyDown(keyCode, event);
+    }
+
+    @Override
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_HOME:
+            case KeyEvent.KEYCODE_APP_SWITCH:
+            case KeyEvent.KEYCODE_MENU:
+            case KeyEvent.KEYCODE_SEARCH:
+                return true;
+        }
+        return super.onKeyUp(keyCode, event);
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         if (webView != null) webView.onPause();
-        if (examActive && !currentExamId.isEmpty()) {
-            pingServer("warning");
-        }
+        if (examActive && !currentExamId.isEmpty()) pingServer("warning");
     }
 
     @Override
@@ -165,9 +158,75 @@ public class MainActivity extends Activity {
         super.onResume();
         if (webView != null) webView.onResume();
         hideSystemUI();
-        if (examActive && !currentExamId.isEmpty()) {
-            pingServer("normal");
-        }
+        if (examActive && !currentExamId.isEmpty()) pingServer("normal");
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) hideSystemUI();
+    }
+
+    private void hideSystemUI() {
+        getWindow().getDecorView().setSystemUiVisibility(
+            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+            | View.SYSTEM_UI_FLAG_FULLSCREEN
+            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        );
+    }
+
+    private void showPinDialog() {
+        if (pinDialogShowing) return;
+        pinDialogShowing = true;
+        runOnUiThread(new Runnable() {
+            @Override public void run() {
+                LinearLayout layout = new LinearLayout(MainActivity.this);
+                layout.setOrientation(LinearLayout.VERTICAL);
+                int pad = (int)(20 * getResources().getDisplayMetrics().density);
+                layout.setPadding(pad, pad, pad, 0);
+                TextView msg = new TextView(MainActivity.this);
+                msg.setText("Masukkan PIN dari Proktor untuk keluar dari ujian");
+                msg.setTextSize(14);
+                msg.setPadding(0, 0, 0, pad/2);
+                layout.addView(msg);
+                final EditText pinInput = new EditText(MainActivity.this);
+                pinInput.setHint("PIN Proktor");
+                pinInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+                pinInput.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+                pinInput.setTextSize(24);
+                layout.addView(pinInput);
+                AlertDialog dialog = new AlertDialog.Builder(MainActivity.this)
+                    .setTitle("Keluar dari Ujian")
+                    .setView(layout)
+                    .setCancelable(false)
+                    .setPositiveButton("Keluar", null)
+                    .setNegativeButton("Kembali ke Soal", new DialogInterface.OnClickListener() {
+                        @Override public void onClick(DialogInterface d, int w) { pinDialogShowing = false; d.dismiss(); }
+                    }).create();
+                dialog.setOnShowListener(new DialogInterface.OnShowListener() {
+                    @Override public void onShow(final DialogInterface d) {
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
+                            @Override public void onClick(View v) {
+                                String entered = pinInput.getText().toString().trim();
+                                if (entered.equals(kioskPin)) {
+                                    pinDialogShowing = false;
+                                    d.dismiss();
+                                    finish();
+                                } else {
+                                    pinInput.setText("");
+                                    pinInput.setError("PIN salah!");
+                                    Toast.makeText(MainActivity.this, "PIN salah!", Toast.LENGTH_SHORT).show();
+                                }
+                            }
+                        });
+                    }
+                });
+                dialog.show();
+            }
+        });
     }
 
     private void pingServer(final String status) {
@@ -222,94 +281,6 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    @Override
-    public void onBackPressed() {
-        if (webView != null && webView.canGoBack()) { webView.goBack(); return; }
-        showPinDialog();
-    }
-
-    @Override
-    public boolean onKeyDown(int keyCode, KeyEvent event) {
-        switch (keyCode) {
-            case KeyEvent.KEYCODE_HOME:
-            case KeyEvent.KEYCODE_APP_SWITCH:
-            case KeyEvent.KEYCODE_MENU:
-            case KeyEvent.KEYCODE_SEARCH:
-                showPinDialog(); return true;
-        }
-        return super.onKeyDown(keyCode, event);
-    }
-
-    @Override
-    public boolean onKeyUp(int keyCode, KeyEvent event) {
-        switch (keyCode) {
-            case KeyEvent.KEYCODE_HOME:
-            case KeyEvent.KEYCODE_APP_SWITCH:
-            case KeyEvent.KEYCODE_MENU:
-            case KeyEvent.KEYCODE_SEARCH: return true;
-        }
-        return super.onKeyUp(keyCode, event);
-    }
-
-    private void showPinDialog() {
-        if (pinDialogShowing) return;
-        pinDialogShowing = true;
-        runOnUiThread(new Runnable() {
-            @Override public void run() {
-                LinearLayout layout = new LinearLayout(MainActivity.this);
-                layout.setOrientation(LinearLayout.VERTICAL);
-                int pad = (int)(20 * getResources().getDisplayMetrics().density);
-                layout.setPadding(pad, pad, pad, 0);
-                TextView msg = new TextView(MainActivity.this);
-                msg.setText("Masukkan PIN dari Proktor untuk keluar dari ujian");
-                msg.setTextSize(14);
-                msg.setPadding(0, 0, 0, pad/2);
-                layout.addView(msg);
-                final EditText pinInput = new EditText(MainActivity.this);
-                pinInput.setHint("PIN Proktor");
-                pinInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER |
-                        android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD);
-                pinInput.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
-                pinInput.setTextSize(24);
-                layout.addView(pinInput);
-
-                AlertDialog dialog = new AlertDialog.Builder(MainActivity.this)
-                    .setTitle("Keluar dari Ujian")
-                    .setView(layout)
-                    .setCancelable(false)
-                    .setPositiveButton("Keluar", null)
-                    .setNegativeButton("Kembali ke Soal", new DialogInterface.OnClickListener() {
-                        @Override public void onClick(DialogInterface d, int w) {
-                            pinDialogShowing = false; d.dismiss();
-                        }
-                    }).create();
-
-                dialog.setOnShowListener(new DialogInterface.OnShowListener() {
-                    @Override public void onShow(final DialogInterface d) {
-                        dialog.getButton(AlertDialog.BUTTON_POSITIVE)
-                            .setOnClickListener(new View.OnClickListener() {
-                                @Override public void onClick(View v) {
-                                    String entered = pinInput.getText().toString().trim();
-                                    if (entered.equals(kioskPin)) {
-                                        pinDialogShowing = false;
-                                        d.dismiss();
-                                        stopKioskMode();
-                                        finish();
-                                    } else {
-                                        pinInput.setText("");
-                                        pinInput.setError("PIN salah!");
-                                        Toast.makeText(MainActivity.this,
-                                            "PIN salah!", Toast.LENGTH_SHORT).show();
-                                    }
-                                }
-                            });
-                    }
-                });
-                dialog.show();
-            }
-        });
-    }
-
     private void fetchKioskPin() {
         new Thread(new Runnable() {
             @Override public void run() {
@@ -322,37 +293,18 @@ public class MainActivity extends Activity {
                     String cookies = CookieManager.getInstance().getCookie(PIN_API_URL);
                     if (cookies != null) conn.setRequestProperty("Cookie", cookies);
                     if (conn.getResponseCode() == 200) {
-                        BufferedReader br = new BufferedReader(
-                            new InputStreamReader(conn.getInputStream()));
+                        BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream()));
                         StringBuilder sb = new StringBuilder();
                         String line;
                         while ((line = br.readLine()) != null) sb.append(line);
                         br.close();
                         JSONObject json = new JSONObject(sb.toString());
-                        if ("ok".equals(json.optString("status")))
-                            kioskPin = json.optString("pin", "1234");
+                        if ("ok".equals(json.optString("status"))) kioskPin = json.optString("pin", "1234");
                     }
                     conn.disconnect();
                 } catch (Exception e) {}
             }
         }).start();
-    }
-
-    private void hideSystemUI() {
-        getWindow().getDecorView().setSystemUiVisibility(
-            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-            | View.SYSTEM_UI_FLAG_FULLSCREEN
-            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-        );
-    }
-
-    @Override
-    public void onWindowFocusChanged(boolean hasFocus) {
-        super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) hideSystemUI();
     }
 
     @Override
