@@ -69,6 +69,8 @@ public class MainActivity extends Activity {
         s.setDisplayZoomControls(false);
         s.setLoadWithOverviewMode(true);
         s.setUseWideViewPort(true);
+        String defaultUA = s.getUserAgentString();
+        s.setUserAgentString(defaultUA + " EDUKasuariExamBrowser/1.0 Android");
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
         webView.addJavascriptInterface(new Object() {
