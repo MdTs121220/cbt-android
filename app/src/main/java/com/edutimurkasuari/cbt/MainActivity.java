@@ -46,6 +46,7 @@ public class MainActivity extends Activity {
     private String  currentCsrfToken= "";
     private boolean examActive       = false;
     private boolean pinDialogShowing = false;
+    private Runnable exitPingRunnable; // delay 3 detik sebelum ping "exited"
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -143,15 +144,24 @@ public class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
         if (webView != null) webView.onPause();
-        if (examActive && !currentExamId.isEmpty()) pingServer("warning");
+        // Tidak kirim ping di onPause — terlalu sering dipanggil untuk hal normal
+        // (rotasi layar, notifikasi, keyboard muncul, dsb)
     }
 
     @Override
     protected void onStop() {
         super.onStop();
         if (examActive && !currentExamId.isEmpty()) {
-            pingServer("exited");
-            submitExamFromBackground();
+            // Delay 3 detik sebelum ping "exited" — cegah false positive dari
+            // rotasi layar / screen lock sementara (onResume akan cancel ini)
+            exitPingRunnable = new Runnable() {
+                @Override public void run() {
+                    exitPingRunnable = null;
+                    pingServer("exited");
+                    submitExamFromBackground();
+                }
+            };
+            handler.postDelayed(exitPingRunnable, 3000);
         }
     }
 
@@ -160,6 +170,11 @@ public class MainActivity extends Activity {
         super.onResume();
         if (webView != null) webView.onResume();
         hideSystemUI();
+        // Cancel ping "exited" jika siswa kembali dalam 3 detik
+        if (exitPingRunnable != null) {
+            handler.removeCallbacks(exitPingRunnable);
+            exitPingRunnable = null;
+        }
         if (examActive && !currentExamId.isEmpty()) pingServer("normal");
     }
 
