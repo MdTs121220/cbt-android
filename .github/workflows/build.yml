@@ -4,15 +4,6 @@ on:
   push:
     branches: [ main ]
   workflow_dispatch:
-    inputs:
-      build_release:
-        description: 'Build signed Release AAB (butuh keystore secrets)'
-        required: false
-        default: 'false'
-        type: choice
-        options:
-          - 'false'
-          - 'true'
 
 jobs:
   # ── Job 1: Debug APK — selalu jalan, tidak perlu keystore ─────────────────
@@ -46,33 +37,50 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
 
-  # ── Job 2: Release AAB — hanya jalan saat dipilih manual via workflow_dispatch
+  # ── Job 2: Release AAB — jalan otomatis, skip jika keystore belum diset ───
   build-release-aab:
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.build_release == 'true'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Check keystore secret
+        id: check_keystore
+        env:
+          KEYSTORE_SECRET: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_SECRET" ]; then
+            echo "available=true" >> $GITHUB_OUTPUT
+          else
+            echo "available=false" >> $GITHUB_OUTPUT
+            echo "⚠️  KEYSTORE_BASE64 secret belum diset — skip Release AAB build."
+          fi
+
       - name: Set up JDK 17
+        if: steps.check_keystore.outputs.available == 'true'
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
       - name: Setup Android SDK
+        if: steps.check_keystore.outputs.available == 'true'
         uses: android-actions/setup-android@v3
 
       - name: Install Gradle
+        if: steps.check_keystore.outputs.available == 'true'
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.4'
 
       - name: Decode Keystore
-        run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > app/edukasuari.keystore
+        if: steps.check_keystore.outputs.available == 'true'
+        env:
+          KEYSTORE_SECRET: ${{ secrets.KEYSTORE_BASE64 }}
+        run: echo "$KEYSTORE_SECRET" | base64 -d > app/edukasuari.keystore
 
       - name: Build Release AAB
+        if: steps.check_keystore.outputs.available == 'true'
         env:
           KEYSTORE_PATH: edukasuari.keystore
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -81,6 +89,7 @@ jobs:
         run: gradle bundleRelease --stacktrace
 
       - name: Upload Release AAB (Play Store)
+        if: steps.check_keystore.outputs.available == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: CBT-EDU-TimurKasuari-AAB
