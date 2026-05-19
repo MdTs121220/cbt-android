@@ -11,14 +11,14 @@ android {
         minSdk 21
         targetSdk 34
         versionCode 1
-        versionName "1.0"
+        versionName "1.0.0"
     }
 
     signingConfigs {
         release {
-            storeFile file(System.getenv("KEYSTORE_PATH") ?: "keystore.jks")
+            storeFile file(System.getenv("KEYSTORE_PATH") ?: "edukasuari.keystore")
             storePassword System.getenv("KEYSTORE_PASSWORD") ?: ""
-            keyAlias System.getenv("KEY_ALIAS") ?: ""
+            keyAlias System.getenv("KEY_ALIAS") ?: "edukasuari"
             keyPassword System.getenv("KEY_PASSWORD") ?: ""
         }
     }
@@ -34,6 +34,19 @@ android {
         debug {
             applicationIdSuffix ".debug"
             debuggable true
+        }
+    }
+
+    // AAB bundle config untuk Play Store
+    bundle {
+        language {
+            enableSplit = false   // jangan split per bahasa
+        }
+        density {
+            enableSplit = true
+        }
+        abi {
+            enableSplit = true
         }
     }
 
